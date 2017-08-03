@@ -470,11 +470,7 @@ local function modifier_request(state, arguments, level)
 
 
   if lookup((res.headers or {}),"X-Powered-By") ~= "mock_upstream" then
-    if lookup((res.headers or {}),"X-Powered-By") ~= "mockbin" then
-      if type(body.url) ~= "string" or not body.url:find("//httpbin.org") then
-        error("Could not determine the response to be from mock_upstream, mockbin or httpbin")
-      end
-    end
+    error("Could not determine the response to be from mock_upstream")
   end
 
   rawset(state, "kong_request", request)
@@ -631,8 +627,7 @@ luassert:register("assertion", "res_status", res_status,
 
 --- Checks and returns a json body of an http response/request. Only checks
 -- validity of the json, does not check appropriate headers. Setting the target
--- to check can be done through `request` or `response` (requests are only
--- supported by mock_upstream and mockbin.com)
+-- to check can be done through `request` or `response`
 -- @name jsonbody
 -- @return the decoded json as a table
 -- @usage
@@ -657,16 +652,6 @@ local function jsonbody(state, args)
     local r = rawget(state, "kong_request")
     if r.params then -- mock_upstream
       local json = {params = r.params, data = r.data}
-      return true, {json}
-
-    elseif r.postData and r.postData.text then -- mockbin
-      local text = r.postData.text
-      local json, err = cjson.decode(text)
-      if not json then
-        table.insert(args, 1, "Error decoding: " .. tostring(err) .. "\nRequest body:" .. text)
-        args.n = 1
-        return false
-      end
       return true, {json}
 
     else
@@ -734,11 +719,8 @@ local function req_query_param(state, args)
   local req = rawget(state, "kong_request")
   assert(req, "'queryparam' assertion only works with a request object")
   local params
-  if type(req.args) == "table" then -- mock_upstream && httpbin
+  if type(req.args) == "table" then -- mock_upstream
     params = req.args
-
-  elseif type(req.queryString) == "table" then -- mockbin
-    params = req.queryString
 
   else
     error("No query parameters found in request object")
@@ -769,7 +751,7 @@ luassert:register("assertion", "queryparam", req_query_param,
                   "assertion.req_query_param.positive")
 
 ---
--- Adds an assertion to look for a urlencoded form parameter in a mockbin request.
+-- Adds an assertion to look for a urlencoded form parameter in a request.
 -- Parameter name comparison is done case-insensitive. Use the `request` modifier to set
 -- the request to operate on.
 -- @name formparam
@@ -778,17 +760,13 @@ luassert:register("assertion", "queryparam", req_query_param,
 local function req_form_param(state, args)
   local param = args[1]
   local req = rawget(state, "kong_request")
-  assert(req, "'formparam' assertion can only be used with a mock_upstream/mockbin/httpbin request object")
+  assert(req, "'formparam' assertion can only be used with a mock_upstream request object")
 
   local value
-  if req.form then -- mock_upstream / httpbin
+  if req.form then -- mock_upstream
     value = lookup(req.form or {}, param)
-
-  elseif req.postData then -- mockbin
-    value = lookup((req.postData or {}).params, param)
-
   else
-    error("Could not determine the request to be from either mock_upstream, mockbin.com or httpbin.org")
+    error("Could not determine the request to be from either mock_upstream")
   end
 
   table.insert(args, 1, req)
