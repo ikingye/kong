@@ -248,7 +248,7 @@ for i, policy in ipairs({"local", "cluster", "redis"}) do
     end)
 
     describe("Without authentication (IP address)", function()
-      it("#focus blocks if exceeding limit", function()
+      it("blocks if exceeding limit", function()
         for i = 1, 6 do
           local res = assert(helpers.proxy_client():send {
             method = "GET",
@@ -257,8 +257,6 @@ for i, policy in ipairs({"local", "cluster", "redis"}) do
               ["Host"] = "test1.com"
             }
           })
-
-          error(res)
 
           ngx.sleep(SLEEP_TIME) -- Wait for async timer to increment the limit
 
@@ -418,9 +416,9 @@ for i, policy in ipairs({"local", "cluster", "redis"}) do
             ["Host"] = "test8.com"
           }
         })
-        local body = cjson.decode(assert.res_status(200, res))
-        assert.equal(4, tonumber(body.headers["X-Ratelimit-Remaining-Image"]))
-        assert.equal(6, tonumber(body.headers["X-Ratelimit-Remaining-Video"]))
+        local json = cjson.decode(assert.res_status(200, res))
+        assert.equal(4, tonumber(json.headers["x-ratelimit-remaining-image"]))
+        assert.equal(6, tonumber(json.headers["x-ratelimit-remaining-video"]))
 
         -- Actually consume the limits
         local res = assert(helpers.proxy_client():send {
@@ -442,8 +440,8 @@ for i, policy in ipairs({"local", "cluster", "redis"}) do
           }
         })
         local body = cjson.decode(assert.res_status(200, res))
-        assert.equal(3, tonumber(body.headers["X-Ratelimit-Remaining-Image"]))
-        assert.equal(4, tonumber(body.headers["X-Ratelimit-Remaining-Video"]))
+        assert.equal(3, tonumber(body.headers["x-ratelimit-remaining-image"]))
+        assert.equal(4, tonumber(body.headers["x-ratelimit-remaining-video"]))
       end)
 
       it("combines multiple x-kong-limit headers from upstream", function()
@@ -673,7 +671,7 @@ for i, policy in ipairs({"local", "cluster", "redis"}) do
           -- Make another request
           local res = assert(helpers.proxy_client():send {
             method = "GET",
-            path = "/status/200/",
+            path = "/status/200",
             headers = {
               ["Host"] = "failtest3.com"
             }
@@ -686,7 +684,7 @@ for i, policy in ipairs({"local", "cluster", "redis"}) do
           -- Make another request
           local res = assert(helpers.proxy_client():send {
             method = "GET",
-            path = "/status/200/",
+            path = "/status/200",
             headers = {
               ["Host"] = "failtest4.com"
             }

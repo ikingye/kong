@@ -292,7 +292,7 @@ http {
                 return mu.filter_access_by_method("POST")
             }
             content_by_lua_block {
-                local mu  = require "spec.fixtures.mock_upstream"
+                local mu = require "spec.fixtures.mock_upstream"
                 return mu.send_default_json_response()
             }
         }
@@ -303,7 +303,7 @@ http {
                 return mu.filter_access_by_method("GET")
             }
             content_by_lua_block {
-                local mu               = require "spec.fixtures.mock_upstream"
+                local mu = require "spec.fixtures.mock_upstream"
                 return mu.send_default_json_response({}, ngx.req.get_uri_args())
             }
         }

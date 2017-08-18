@@ -1,9 +1,11 @@
 local helpers = require "spec.helpers"
 
 local function create_big_data(size)
-  return string.format([[
-    {"mock_json":{"big_field":"%s"}}
-  ]], string.rep("*", size))
+  return {
+    mock_json = {
+      big_field = string.rep("*", size),
+    },
+  }
 end
 
 describe("Plugin: response-transformer", function()
@@ -23,7 +25,7 @@ describe("Plugin: response-transformer", function()
           json = {"p1:v1"},
         },
         remove = {
-          json = {"json"},
+          json = {"params"},
         }
       },
     })
@@ -46,11 +48,11 @@ describe("Plugin: response-transformer", function()
     if client then client:close() end
   end)
 
-  it("#focus add new parameters on large POST", function()
+  it("add new parameters on large POST", function()
     local r = assert(client:send {
       method = "POST",
       path = "/post",
-      body = {create_big_data(1 * 1024 * 1024)},
+      body = create_big_data(1024 * 1024),
       headers = {
         host = "response.com",
         ["content-type"] = "application/json",
@@ -64,7 +66,7 @@ describe("Plugin: response-transformer", function()
     local r = assert(client:send {
       method = "POST",
       path = "/post",
-      body = {create_big_data(1 * 1024 * 1024)},
+      body = create_big_data(1024 * 1024),
       headers = {
         host = "response.com",
         ["content-type"] = "application/json",

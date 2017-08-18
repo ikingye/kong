@@ -3,12 +3,124 @@ local cjson_safe = require "cjson.safe"
 local cjson      = require "cjson"
 local ws_server  = require "resty.websocket.server"
 
+
+local function string_trim(s)
+  local _,i1 = s:find("^%s*")
+  return s:sub(i1 + 1, s:find("%s*$") - 1)
+end
+
+
+local function string_beginswith(s, prefix)
+  return s:sub(1, #prefix) == prefix
+end
+
+
+local function multipart_parse_part_name(part_headers_text)
+
+  local part_headers_split, err = utils.split(part_headers_text, '\\n')
+
+  if err then
+    return nil, err
+  end
+
+  local m, err, header_text
+
+  for i = 1, #part_headers_split do
+    header_text = string_trim(part_headers_split[i])
+
+    if string_beginswith(header_text:lower(), "content-disposition") then
+      m, err = ngx.re.match(header_text, 'name="(.*?)"', "oj")
+
+      if err or not m or not m[1] then
+        return nil, "could not parse part name. Error: " .. tostring(err)
+      end
+
+      return m[1]
+    end
+  end
+
+  return nil, "could not find part name in: " .. part_headers_text
+end
+
+
+local function multipart_form_parse(body, content_type)
+  if not body then
+    return nil, 'missing body'
+  elseif not content_type then
+    return nil, 'missing content-type'
+  end
+
+  local m, err = ngx.re.match(content_type, "boundary=(.+)", "oj")
+  if err or not m or not m[1] then
+    return nil, "could not find boundary in content type " .. content_type ..
+                "error: " .. tostring(err)
+  end
+
+  local boundary = m[1]
+
+  local parts_split, err = utils.split(body, '--' .. boundary)
+  if err then
+    return nil, err
+  end
+
+  local form = {}
+
+  for i = 1, #parts_split do
+    local part = string_trim(parts_split[i])
+
+    if part ~= '' and part ~= '--' then
+      local from, to, err = ngx.re.find(part, '^\\r$', 'ojm')
+      if err or (not from and not to) then
+        return nil, nil, "could not find part body. Error: " .. tostring(err)
+      end
+
+      local part_headers = part:sub(1, from - 1)
+      local part_value   = part:sub(to + 2, #part) -- +2: trim leading line jump
+
+      local part_name, err = multipart_parse_part_name(part_headers)
+      if not part_name then
+        return nil, err
+      end
+
+      form[part_name] = part_value
+    end
+  end
+
+  return form
+end
+
+
+local function send_text_response(text, content_type, headers)
+  headers       = headers or {}
+  content_type  = content_type or "text/plain"
+
+  text = ngx.req.get_method() == "HEAD" and "" or tostring(text)
+
+  ngx.header["X-Powered-By"]   = "mock_upstream"
+  ngx.header["Content-Length"] = #text + 1
+  ngx.header["Content-Type"]   = content_type
+
+  for header,value in pairs(headers) do
+    if type(value) == "table" then
+      ngx.header[header] = table.concat(value, ", ")
+    else
+      ngx.header[header] = value
+    end
+  end
+
+  return ngx.say(text)
+end
+
+local function send_error(status, text)
+  ngx.status = status
+  send_text_response(text)
+  return ngx.exit(200)
+end
+
+
 local function filter_access_by_method(method)
   if ngx.req.get_method() ~= method then
-    ngx.status = ngx.HTTP_NOT_ALLOWED
-    ngx.header["X-Powered-By"] = "mock_upstream"
-    ngx.say("The method is not allowed for the requested URL")
-    return ngx.exit(ngx.HTTP_NOT_ALLOWED)
+    return send_error(ngx.HTTP_NOT_ALLOWED, "The method is not allowed for the requested URL")
   end
 end
 
@@ -63,28 +175,6 @@ local function filter_access_by_basic_auth(expected_username,
 end
 
 
-local function send_text_response(text, content_type, headers)
-  headers       = headers or {}
-  content_type  = content_type or "text/plain"
-
-  text = ngx.req.get_method() == "HEAD" and "" or tostring(text)
-
-  ngx.header["X-Powered-By"]   = "mock_upstream"
-  ngx.header["Content-Length"] = #text + 1
-  ngx.header["Content-Type"]   = content_type
-
-  for header,value in pairs(headers) do
-    if type(value) == "table" then
-      ngx.header[header] = table.concat(value, ", ")
-    else
-      ngx.header[header] = value
-    end
-  end
-
-  return ngx.say(text)
-end
-
-
 local function get_ngx_vars()
   local var = ngx.var
   return {
@@ -129,7 +219,7 @@ local function get_body_data()
     return data
   end
 
-  return nil, "could not read body data or body file"
+  return ""
 end
 
 
@@ -138,19 +228,22 @@ local function get_default_json_response()
   local headers            = req.get_headers(0)
   local data, form, params = "", {}, cjson_safe.null
   local ct                 = headers["Content-Type"]
+  local err
   if ct then
     req.read_body()
-    if string.find(ct, "application/x-www-form-urlencoded", nil, true) then
+    if ct:find("application/x-www-form-urlencoded", nil, true) then
       form = req.get_post_args()
-      form['potato'] = true
 
-    elseif string.find(ct, "application/json", nil, true) then
-      local err
-      data, err = get_body_data()
-      if not data then
-        ngx.log(ngx.ERR, "could not read body data: ", err)
-        return ngx.exit(ngx.HTTP_INTERNAL_SERVER_ERROR)
+    elseif ct:find("multipart/form-data", nil, true) then
+
+      form, err = multipart_form_parse(get_body_data(), ct)
+      if err then
+        return send_error(ngx.HTTP_BAD_REQUEST,
+                          "could not find multipart boundary. Error: " .. tostring(err))
       end
+
+    elseif ct:find("application/json", nil, true) then
+      data = get_body_data()
       -- ignore decoding errors
       params = cjson_safe.decode(data) or cjson_safe.null
     end
